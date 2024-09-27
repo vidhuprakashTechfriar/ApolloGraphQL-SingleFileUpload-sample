@@ -1,10 +1,7 @@
 const express = require("express");
 const { ApolloServer, gql } = require("apollo-server-express");
 const cors = require("cors");
-const {
-  GraphQLUpload,
-  graphqlUploadExpress, // A Koa implementation is also exported.
-} = require("graphql-upload");
+const { GraphQLUpload, graphqlUploadExpress } = require("graphql-upload");
 const { finished } = require("stream/promises");
 const {
   ApolloServerPluginLandingPageLocalDefault,
@@ -39,6 +36,7 @@ const typeDefs = gql`
   type Mutation {
     # Multiple uploads are supported. See graphql-upload docs for details.
     singleUpload(file: Upload!): File!
+    multipleUpload(files: [Upload!]!): [File!]!
   }
 `;
 
@@ -56,13 +54,25 @@ const resolvers = {
       const stream = createReadStream();
 
       const outPath = path.join(assetDir, filename);
-      // This is purely for demonstration purposes and will overwrite the
-      // local-file-output.txt in the current working directory on EACH upload.
       const out = fs.createWriteStream(outPath);
       stream.pipe(out);
       await finished(out);
 
       return { filename, mimetype, encoding };
+    },
+
+    multipleUpload: async (parent, { files }) => {
+      const uploadPromises = files.map(async (file) => {
+        const { createReadStream, filename, mimetype, encoding } = await file;
+        const stream = createReadStream();
+        const outPath = path.join(assetDir, filename);
+        const out = fs.createWriteStream(outPath);
+        stream.pipe(out);
+        await finished(out);
+        return { filename, mimetype, encoding };
+      });
+
+      return Promise.all(uploadPromises);
     },
   },
 };
@@ -82,8 +92,8 @@ async function startServer() {
 
   app.use(
     cors({
-      origin: "http://localhost:3000", // Change this to the URL of your frontend application
-      credentials: true, // Allow credentials to be included
+      origin: "http://localhost:3000",
+      credentials: true,
       allowedHeaders: [
         "Content-Type",
         "Authorization",
