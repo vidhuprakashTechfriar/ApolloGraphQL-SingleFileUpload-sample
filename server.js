@@ -39,6 +39,7 @@ const typeDefs = gql`
   type Mutation {
     # Multiple uploads are supported. See graphql-upload docs for details.
     singleUpload(file: Upload!): File!
+    multipleUpload(files: [Upload!]!): [File!]!
   }
 `;
 
@@ -63,6 +64,20 @@ const resolvers = {
       await finished(out);
 
       return { filename, mimetype, encoding };
+    },
+
+    multipleUpload: async (parent, { files }) => {
+      const uploadPromises = files.map(async (file) => {
+        const { createReadStream, filename, mimetype, encoding } = await file;
+        const stream = createReadStream();
+        const outPath = path.join(assetDir, filename);
+        const out = fs.createWriteStream(outPath);
+        stream.pipe(out);
+        await finished(out);
+        return { filename, mimetype, encoding };
+      });
+
+      return Promise.all(uploadPromises);
     },
   },
 };
