@@ -1,4 +1,6 @@
 const express = require("express");
+const dotenv = require("dotenv");
+
 const { ApolloServer, gql } = require("apollo-server-express");
 const cors = require("cors");
 const { GraphQLUpload, graphqlUploadExpress } = require("graphql-upload");
@@ -8,6 +10,12 @@ const {
 } = require("apollo-server-core");
 const fs = require("fs");
 const path = require("path");
+const { uploadToMinio } = require("./utils/minio-config");
+
+// Load environment variables from .env file
+dotenv.config();
+
+const uploadBucket = process.env.UPLOAD_BUCKET;
 
 const assetDir = path.join(__dirname, "asset");
 if (!fs.existsSync(assetDir)) {
@@ -24,6 +32,7 @@ const typeDefs = gql`
     filename: String!
     mimetype: String!
     encoding: String!
+    url: String!
   }
 
   type Query {
@@ -31,6 +40,7 @@ const typeDefs = gql`
     # field be present within the 'Query' type.  This example does not
     # demonstrate how to fetch uploads back.
     otherFields: Boolean!
+    filename: String
   }
 
   type Mutation {
@@ -49,27 +59,59 @@ const resolvers = {
     singleUpload: async (parent, { file }) => {
       const { createReadStream, filename, mimetype, encoding } = await file;
 
+      // Generate a unique filename using timestamp
+      const timestamp = Date.now();
+      const uniqueFileName = `${timestamp}_${filename}`;
+
       // Invoking the `createReadStream` will return a Readable Stream.
       // See https://nodejs.org/api/stream.html#stream_readable_streams
       const stream = createReadStream();
 
-      const outPath = path.join(assetDir, filename);
-      const out = fs.createWriteStream(outPath);
-      stream.pipe(out);
-      await finished(out);
+      // Call the MinIO upload function with the stream, bucket name, and filename
+      const fileUrl = await uploadToMinio(
+        stream,
+        uploadBucket,
+        uniqueFileName,
+        mimetype
+      );
 
-      return { filename, mimetype, encoding };
+      // const outPath = path.join(assetDir, filename);
+      // const out = fs.createWriteStream(outPath);
+      // stream.pipe(out);
+      // await finished(out);
+
+      // return { filename, mimetype, encoding };
+
+      return {
+        filename: uniqueFileName,
+        mimetype,
+        encoding,
+        url: fileUrl,
+      };
     },
 
     multipleUpload: async (parent, { files }) => {
       const uploadPromises = files.map(async (file) => {
         const { createReadStream, filename, mimetype, encoding } = await file;
+
+        const timestamp = Date.now();
+        const uniqueFileName = `${timestamp}_${filename}`;
+
         const stream = createReadStream();
-        const outPath = path.join(assetDir, filename);
-        const out = fs.createWriteStream(outPath);
-        stream.pipe(out);
-        await finished(out);
-        return { filename, mimetype, encoding };
+
+        const fileUrl = await uploadToMinio(
+          stream,
+          uploadBucket,
+          uniqueFileName,
+          mimetype
+        );
+
+        return {
+          filename: uniqueFileName,
+          mimetype,
+          encoding,
+          url: fileUrl,
+        };
       });
 
       return Promise.all(uploadPromises);
